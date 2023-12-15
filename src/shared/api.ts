@@ -142,6 +142,34 @@ export class API {
     }
   }
 
+  async jukeboxClear() {
+    await this.jukeboxAction('clear', {})
+  }
+
+  async jukeboxAdd(id: Array<string>) {
+    await this.jukeboxAction('add', { id })
+  }
+
+  async jukeboxSet(id: Array<string>) {
+    await this.jukeboxAction('set', { id })
+  }
+
+  async jukeboxSkip(index: number, offset: number) {
+    await this.jukeboxAction('skip', { index, offset })
+  }
+
+  async jukeboxRemove(index: number) {
+    await this.jukeboxAction('remove', { index })
+  }
+
+  async jukeboxStart() {
+    await this.jukeboxAction('start', {})
+  }
+
+  async jukeboxStop() {
+    await this.jukeboxAction('stop', {})
+  }
+
   async getGenres() {
     const response = await this.fetch('rest/getGenres', {})
     return (response.genres.genre || [])
@@ -597,5 +625,9 @@ export class API {
       '&v=1.15.0' +
       `&${urlParams}` +
       `&c=${this.clientName}`
+  }
+
+  private jukeboxAction(action: string, params: object) {
+    return this.fetch('rest/jukeboxControl', { action, ...params })
   }
 }

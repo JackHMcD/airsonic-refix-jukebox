@@ -13,6 +13,7 @@ const mediaSession: MediaSession | undefined = navigator.mediaSession
 const audio = new AudioController()
 
 interface State {
+  api: API | null;
   queue: any[];
   queueIndex: number;
   scrobbled: boolean;
@@ -27,13 +28,13 @@ interface State {
 }
 
 function persistQueue(state: State) {
-  localStorage.setItem('queue', JSON.stringify(state.queue))
-  localStorage.setItem('queueIndex', state.queueIndex.toString())
+  // do nothing
 }
 
 export const playerModule: Module<State, any> = {
   namespaced: true,
   state: {
+    api: null,
     queue: storedQueue,
     queueIndex: storedQueueIndex,
     scrobbled: false,
@@ -71,7 +72,6 @@ export const playerModule: Module<State, any> = {
     setQueue(state, queue) {
       state.queue = queue
       state.queueIndex = -1
-      persistQueue(state)
     },
     setQueueIndex(state, index) {
       if (state.queue.length === 0) {
@@ -80,12 +80,10 @@ export const playerModule: Module<State, any> = {
       index = Math.max(0, index)
       index = index < state.queue.length ? index : 0
       state.queueIndex = index
-      persistQueue(state)
       state.scrobbled = false
       const track = state.queue[index]
       state.duration = track.duration
       const next = (index + 1) % state.queue.length
-      audio.setBuffer(state.queue[next].url)
       if (mediaSession) {
         mediaSession.metadata = new MediaMetadata({
           title: track.title,
@@ -160,10 +158,12 @@ export const playerModule: Module<State, any> = {
       commit('setShuffle', true)
       dispatch('playTrackList', { tracks })
     },
-    async playTrackListIndex({ commit, getters }, { index }) {
+    async playTrackListIndex({ commit, state, getters }, { index }) {
       commit('setQueueIndex', index)
       commit('setPlaying')
-      await audio.changeTrack({ ...getters.track, playbackRate: getters.playbackRate })
+
+      await state.api!.jukeboxSkip(index, 0)
+      await state.api!.jukeboxStart()
     },
     async playTrackList({ commit, state, getters }, { tracks, index }) {
       if (index == null) {
@@ -174,12 +174,13 @@ export const playerModule: Module<State, any> = {
         shuffle(tracks, index)
         index = 0
       }
-      if (!trackListEquals(state.queue, tracks)) {
-        commit('setQueue', tracks)
-      }
+      commit('setQueue', tracks)
       commit('setQueueIndex', index)
       commit('setPlaying')
-      await audio.changeTrack({ ...getters.track, playbackRate: getters.playbackRate })
+
+      await state.api!.jukeboxSet(tracks.map((tr: any) => tr.id))
+      await state.api!.jukeboxSkip(index, 0)
+      await state.api!.jukeboxStart()
     },
     async resume({ commit }) {
       commit('setPlaying')
@@ -195,12 +196,16 @@ export const playerModule: Module<State, any> = {
     async next({ commit, state, getters }) {
       commit('setQueueIndex', state.queueIndex + 1)
       commit('setPlaying')
-      await audio.changeTrack({ ...getters.track, playbackRate: getters.playbackRate })
+
+      await state.api!.jukeboxSkip(state.queueIndex + 1, 0)
     },
     async previous({ commit, state, getters }) {
-      commit('setQueueIndex', audio.currentTime() > 3 ? state.queueIndex : state.queueIndex - 1)
+      const newIndex = audio.currentTime() > 3 ? state.queueIndex : state.queueIndex - 1
+
+      commit('setQueueIndex', newIndex)
       commit('setPlaying')
-      await audio.changeTrack(getters.track)
+
+      await state.api!.jukeboxSkip(newIndex, 0)
     },
     seek({ state }, value) {
       if (isFinite(state.duration)) {
@@ -280,11 +285,17 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
       },
     }
   })
+
+  // lol this is so hacky.
+  store.state.player.api = api
+
   setupAudio(store, mainStore, api)
   return store
 }
 
 function setupAudio(store: Store<any>, mainStore: ReturnType<typeof useMainStore>, api: API) {
+  audio.api = api
+
   audio.ontimeupdate = (value: number) => {
     store.commit('player/setCurrentTime', value)
   }
