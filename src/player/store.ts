@@ -1,16 +1,12 @@
 import Vuex, { Store, Module } from 'vuex'
 import { shuffle, shuffled, trackListEquals } from '@/shared/utils'
 import { API } from '@/shared/api'
-import { AudioController } from '@/player/audio'
 import { useMainStore } from '@/shared/store'
 
 localStorage.removeItem('player.mute')
-const storedQueue = JSON.parse(localStorage.getItem('queue') || '[]')
-const storedQueueIndex = parseInt(localStorage.getItem('queueIndex') || '-1')
 const storedVolume = parseFloat(localStorage.getItem('player.volume') || '1.0')
 const storedPodcastPlaybackRate = parseFloat(localStorage.getItem('player.podcastPlaybackRate') || '1.0')
 const mediaSession: MediaSession | undefined = navigator.mediaSession
-const audio = new AudioController()
 
 interface State {
   api: API | null;
@@ -35,8 +31,8 @@ export const playerModule: Module<State, any> = {
   namespaced: true,
   state: {
     api: null,
-    queue: storedQueue,
-    queueIndex: storedQueueIndex,
+    queue: [],
+    queueIndex: -1,
     scrobbled: false,
     isPlaying: false,
     duration: 0,
@@ -182,13 +178,15 @@ export const playerModule: Module<State, any> = {
       await state.api!.jukeboxSkip(index, 0)
       await state.api!.jukeboxStart()
     },
-    async resume({ commit }) {
+    async resume({ commit, state }) {
       commit('setPlaying')
-      await audio.resume()
+
+      await state.api!.jukeboxStart()
     },
-    async pause({ commit }) {
-      audio.pause()
+    async pause({ commit, state }) {
       commit('setPaused')
+
+      await state.api!.jukeboxStop()
     },
     async playPause({ state, dispatch }) {
       return state.isPlaying ? dispatch('pause') : dispatch('resume')
@@ -199,8 +197,9 @@ export const playerModule: Module<State, any> = {
 
       await state.api!.jukeboxSkip(state.queueIndex + 1, 0)
     },
-    async previous({ commit, state, getters }) {
-      const newIndex = audio.currentTime() > 3 ? state.queueIndex : state.queueIndex - 1
+    async previous({ commit, state }) {
+      // TODO: skip to beginning of track if it's been playing for more than 3s
+      const newIndex = state.queueIndex - 1
 
       commit('setQueueIndex', newIndex)
       commit('setPlaying')
@@ -209,13 +208,15 @@ export const playerModule: Module<State, any> = {
     },
     seek({ state }, value) {
       if (isFinite(state.duration)) {
-        audio.seek(state.duration * value)
+        state.api!.jukeboxSkip(state.queueIndex, state.duration * value)
       }
     },
-    async resetQueue({ commit, getters }) {
+    async resetQueue({ commit, state }) {
       commit('setQueueIndex', 0)
       commit('setPaused')
-      await audio.changeTrack({ ...getters.track, paused: true, playbackRate: getters.playbackRate })
+
+      await state.api!.jukeboxSkip(0, 0)
+      await state.api!.jukeboxStop()
     },
     toggleRepeat({ commit, state }) {
       commit('setRepeat', !state.repeat)
@@ -232,15 +233,13 @@ export const playerModule: Module<State, any> = {
     setNextInQueue({ state, commit }, tracks) {
       commit('setNextInQueue', state.shuffle ? shuffled(tracks) : tracks)
     },
-    setVolume({ commit }, value) {
-      audio.setVolume(value)
+    async setVolume({ state, commit }, value) {
       commit('setVolume', value)
+      await state.api!.jukeboxSetGain(value)
     },
     setPlaybackRate({ commit, getters }, value) {
       commit('setPodcastPlaybackRate', value)
-      if (getters.track?.isPodcast) {
-        audio.setPlaybackRate(value)
-      }
+      throw new Error('not implemented')
     },
   },
 
@@ -289,109 +288,32 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
   // lol this is so hacky.
   store.state.player.api = api
 
-  setupAudio(store, mainStore, api)
-  return store
-}
-
-function setupAudio(store: Store<any>, mainStore: ReturnType<typeof useMainStore>, api: API) {
-  audio.api = api
-
-  audio.ontimeupdate = (value: number) => {
-    store.commit('player/setCurrentTime', value)
-  }
-  audio.ondurationchange = (value: number) => {
-    store.commit('player/setDuration', value)
-  }
-  audio.onended = () => {
-    if (store.getters['player/hasNext'] || store.state.player.repeat) {
-      return store.dispatch('player/next')
-    } else {
-      return store.dispatch('player/resetQueue')
-    }
-  }
-  audio.onpause = () => {
-    store.commit('player/setPaused')
-  }
-  audio.onstreamtitlechange = (value: string | null) => {
-    store.commit('player/setStreamTitle', value)
-  }
-  audio.onerror = (error: any) => {
-    store.commit('player/setPaused')
-    mainStore.setError(error)
-  }
-
-  audio.setVolume(storedVolume)
-  const track = store.getters['player/track']
-  if (track?.url) {
-    audio.changeTrack({ ...track, paused: true })
-  }
-  audio.setPlaybackRate(store.getters['player/playbackRate'])
-
-  if (mediaSession) {
-    mediaSession.setActionHandler('play', () => {
-      store.dispatch('player/resume')
-    })
-    mediaSession.setActionHandler('pause', () => {
-      store.dispatch('player/pause')
-    })
-    mediaSession.setActionHandler('nexttrack', () => {
-      store.dispatch('player/next')
-    })
-    mediaSession.setActionHandler('previoustrack', () => {
-      store.dispatch('player/previous')
-    })
-    mediaSession.setActionHandler('stop', () => {
-      store.dispatch('player/pause')
-    })
-    mediaSession.setActionHandler('seekto', (details) => {
-      if (details.seekTime) {
-        audio.seek(details.seekTime)
+  // Update now playing
+  store.watch(
+    (state, getters) => getters['player/trackId'],
+    () => {
+      const { id, isStream } = store.getters['player/track']
+      if (!isStream) {
+        return api.updateNowPlaying(id)
       }
     })
-    mediaSession.setActionHandler('seekforward', (details) => {
-      const offset = details.seekOffset || 10
-      audio.seek(Math.min(audio.currentTime() + offset, audio.duration()))
-    })
-    mediaSession.setActionHandler('seekbackward', (details) => {
-      const offset = details.seekOffset || 10
-      audio.seek(Math.max(audio.currentTime() - offset, 0))
-    })
-    // FIXME
-    // function updatePositionState() {
-    //   if (mediaSession && mediaSession.setPositionState) {
-    //     mediaSession.setPositionState({
-    //       duration: audio.duration || 0,
-    //       playbackRate: audio.playbackRate,
-    //       position: audio.currentTime,
-    //     });
-    //   }
-    // }
 
-    // Update now playing
-    store.watch(
-      (state, getters) => getters['player/trackId'],
-      () => {
+  // Scrobble
+  store.watch(
+    (state) => state.player.currentTime,
+    () => {
+      if (
+        store.state.player.scrobbled === false &&
+        store.state.player.duration > 30 &&
+        store.state.player.currentTime / store.state.player.duration > 0.7
+      ) {
         const { id, isStream } = store.getters['player/track']
         if (!isStream) {
-          return api.updateNowPlaying(id)
+          store.commit('player/setScrobbled')
+          return api.scrobble(id)
         }
-      })
+      }
+    })
 
-    // Scrobble
-    store.watch(
-      (state) => state.player.currentTime,
-      () => {
-        if (
-          store.state.player.scrobbled === false &&
-          store.state.player.duration > 30 &&
-          store.state.player.currentTime / store.state.player.duration > 0.7
-        ) {
-          const { id, isStream } = store.getters['player/track']
-          if (!isStream) {
-            store.commit('player/setScrobbled')
-            return api.scrobble(id)
-          }
-        }
-      })
-  }
+  return store
 }

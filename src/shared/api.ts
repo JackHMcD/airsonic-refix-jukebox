@@ -170,6 +170,10 @@ export class API {
     await this.jukeboxAction('stop', {})
   }
 
+  async jukeboxSetGain(gain: number) {
+    await this.jukeboxAction('setGain', { gain })
+  }
+
   async getGenres() {
     const response = await this.fetch('rest/getGenres', {})
     return (response.genres.genre || [])

@@ -1,12 +1,9 @@
-import IcecastMetadataStats from 'icecast-metadata-stats'
-
 import { API } from '@/shared/api'
 
 export class AudioController {
   api: API | null = null
 
   private audio = new Audio()
-  private buffer = new Audio()
   private statsListener : any = null
 
   ontimeupdate: (value: number) => void = () => { /* do nothing */ }
@@ -22,10 +19,6 @@ export class AudioController {
 
   duration() {
     return this.audio.duration
-  }
-
-  setBuffer(url: string) {
-    this.buffer.src = url
   }
 
   setVolume(value: number) {
