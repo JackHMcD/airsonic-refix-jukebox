@@ -22,7 +22,6 @@ const jukebox = new JukeboxController()
 interface State {
   queue: any[];
   queueIndex: number;
-  scrobbled: boolean;
   isPlaying: boolean;
   duration: number; // duration of current track in seconds
   currentTime: number; // position of current track in seconds
@@ -42,7 +41,6 @@ export const playerModule: Module<State, any> = {
   state: {
     queue: [],
     queueIndex: -1,
-    scrobbled: false,
     isPlaying: false,
     duration: 0,
     currentTime: 0,
@@ -76,18 +74,8 @@ export const playerModule: Module<State, any> = {
       index = Math.max(0, index)
       index = index < state.queue.length ? index : 0
       state.queueIndex = index
-      state.scrobbled = false
       const track = state.queue[index]
       state.duration = track.duration
-      const next = (index + 1) % state.queue.length
-      if (mediaSession) {
-        mediaSession.metadata = new MediaMetadata({
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          artwork: track.image ? [{ src: track.image, sizes: '300x300' }] : undefined,
-        })
-      }
     },
     addToQueue(state, tracks) {
       state.queue.push(...tracks)
@@ -131,9 +119,6 @@ export const playerModule: Module<State, any> = {
       if (value && mediaSession?.metadata) {
         mediaSession.metadata.title = value
       }
-    },
-    setScrobbled(state) {
-      state.scrobbled = true
     },
     setVolume(state, value: number) {
       state.volume = value
@@ -309,36 +294,10 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
     }
   })
 
-  // Update now playing
-  store.watch(
-    (state, getters) => getters['player/trackId'],
-    () => {
-      const { id, isStream } = store.getters['player/track']
-      if (!isStream) {
-        return api.updateNowPlaying(id)
-      }
-    })
-
-  // Scrobble
-  store.watch(
-    (state) => state.player.currentTime,
-    () => {
-      if (
-        store.state.player.scrobbled === false &&
-        store.state.player.duration > 30 &&
-        store.state.player.currentTime / store.state.player.duration > 0.7
-      ) {
-        const { id, isStream } = store.getters['player/track']
-        if (!isStream) {
-          store.commit('player/setScrobbled')
-          return api.scrobble(id)
-        }
-      }
-    })
-
   setInterval(async() => {
     const status = await api.jukeboxGet()
 
+    // TODO: avoid setting these values if they're already set
     store.commit('player/setQueue', status.entry || [])
     store.commit('player/setQueueIndex', status.currentIndex)
     store.commit('player/setIsPlaying', status.playing)
