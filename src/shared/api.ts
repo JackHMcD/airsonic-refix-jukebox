@@ -185,7 +185,10 @@ export class API {
   async jukeboxGet(): Promise<JukeboxPlaylist> {
     const response = await this.jukeboxAction('get', {})
 
-    return response.jukeboxPlaylist
+    return {
+      ...response.jukeboxPlaylist,
+      entry: (response.jukeboxPlaylist.entry || []).map(this.normalizeTrack, this)
+    }
   }
 
   async getGenres() {
