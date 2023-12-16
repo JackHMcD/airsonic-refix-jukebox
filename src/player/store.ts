@@ -295,14 +295,19 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
   })
 
   setInterval(async() => {
-    const status = await api.jukeboxGet()
-
-    // TODO: avoid setting these values if they're already set
-    store.commit('player/setQueue', status.entry || [])
-    store.commit('player/setQueueIndex', status.currentIndex)
-    store.commit('player/setIsPlaying', status.playing)
-    store.commit('player/setVolume', status.gain)
-    store.commit('player/setCurrentTime', status.position)
+    api
+      .jukeboxGet()
+      .then((status) => {
+        // TODO: avoid setting these values if they're already set
+        store.commit('player/setQueue', status.entry || [])
+        store.commit('player/setQueueIndex', status.currentIndex)
+        store.commit('player/setIsPlaying', status.playing)
+        store.commit('player/setVolume', status.gain)
+        store.commit('player/setCurrentTime', status.position)
+      })
+      .catch((_) => {
+        /* TODO: display that we're disconnected */
+      })
   }, 1000)
 
   return store
