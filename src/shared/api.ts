@@ -27,6 +27,14 @@ export interface Track {
   playCount? : number
 }
 
+export type JukeboxPlaylist = {
+  entry: Array<Track> | undefined
+  currentIndex: number
+  playing: boolean
+  gain: number
+  position: number
+}
+
 export interface Genre {
   name: string
 }
@@ -172,6 +180,12 @@ export class API {
 
   async jukeboxSetGain(gain: number) {
     await this.jukeboxAction('setGain', { gain })
+  }
+
+  async jukeboxGet(): Promise<JukeboxPlaylist> {
+    const response = await this.jukeboxAction('get', {})
+
+    return response.jukeboxPlaylist
   }
 
   async getGenres() {

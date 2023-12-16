@@ -1,6 +1,6 @@
 import Vuex, { Store, Module } from 'vuex'
 import { shuffle, shuffled, trackListEquals } from '@/shared/utils'
-import { API } from '@/shared/api'
+import { API, Track } from '@/shared/api'
 import { useMainStore } from '@/shared/store'
 
 localStorage.removeItem('player.mute')
@@ -8,8 +8,18 @@ const storedVolume = parseFloat(localStorage.getItem('player.volume') || '1.0')
 const storedPodcastPlaybackRate = parseFloat(localStorage.getItem('player.podcastPlaybackRate') || '1.0')
 const mediaSession: MediaSession | undefined = navigator.mediaSession
 
+export class JukeboxController {
+  onPlayTrackListIndex: (index: number) => Promise<void> = async() => { /* do nothing */ }
+  onPlayTrackList: (tracks: Array<Track>, index: number) => Promise<void> = async() => { /* do nothing */ }
+  onResume: () => Promise<void> = async() => { /* do nothing */ }
+  onPause: () => Promise<void> = async() => { /* do nothing */ }
+  skip: (index: number, offset: number) => Promise<void> = async() => { /* do nothing */ }
+  setGain: (gain: number) => Promise<void> = async() => { /* do nothing */ }
+}
+
+const jukebox = new JukeboxController()
+
 interface State {
-  api: API | null;
   queue: any[];
   queueIndex: number;
   scrobbled: boolean;
@@ -30,7 +40,6 @@ function persistQueue(state: State) {
 export const playerModule: Module<State, any> = {
   namespaced: true,
   state: {
-    api: null,
     queue: [],
     queueIndex: -1,
     scrobbled: false,
@@ -45,17 +54,8 @@ export const playerModule: Module<State, any> = {
   },
 
   mutations: {
-    setPlaying(state) {
-      state.isPlaying = true
-      if (mediaSession) {
-        mediaSession.playbackState = 'playing'
-      }
-    },
-    setPaused(state) {
-      state.isPlaying = false
-      if (mediaSession) {
-        mediaSession.playbackState = 'paused'
-      }
+    setIsPlaying(state, isPlaying) {
+      state.isPlaying = isPlaying
     },
     setRepeat(state, enable) {
       state.repeat = enable
@@ -156,10 +156,9 @@ export const playerModule: Module<State, any> = {
     },
     async playTrackListIndex({ commit, state, getters }, { index }) {
       commit('setQueueIndex', index)
-      commit('setPlaying')
+      commit('setIsPlaying', true)
 
-      await state.api!.jukeboxSkip(index, 0)
-      await state.api!.jukeboxStart()
+      await jukebox.onPlayTrackListIndex(index)
     },
     async playTrackList({ commit, state, getters }, { tracks, index }) {
       if (index == null) {
@@ -172,51 +171,49 @@ export const playerModule: Module<State, any> = {
       }
       commit('setQueue', tracks)
       commit('setQueueIndex', index)
-      commit('setPlaying')
+      commit('setIsPlaying', true)
 
-      await state.api!.jukeboxSet(tracks.map((tr: any) => tr.id))
-      await state.api!.jukeboxSkip(index, 0)
-      await state.api!.jukeboxStart()
+      await jukebox.onPlayTrackList(tracks, index)
     },
     async resume({ commit, state }) {
-      commit('setPlaying')
+      commit('setIsPlaying', true)
 
-      await state.api!.jukeboxStart()
+      await jukebox.onResume()
     },
     async pause({ commit, state }) {
-      commit('setPaused')
+      commit('setIsPlaying', false)
 
-      await state.api!.jukeboxStop()
+      await jukebox.onPause()
     },
     async playPause({ state, dispatch }) {
       return state.isPlaying ? dispatch('pause') : dispatch('resume')
     },
     async next({ commit, state, getters }) {
       commit('setQueueIndex', state.queueIndex + 1)
-      commit('setPlaying')
+      commit('setIsPlaying', true)
 
-      await state.api!.jukeboxSkip(state.queueIndex + 1, 0)
+      await jukebox.skip(state.queueIndex + 1, 0)
     },
     async previous({ commit, state }) {
       // TODO: skip to beginning of track if it's been playing for more than 3s
       const newIndex = state.queueIndex - 1
 
       commit('setQueueIndex', newIndex)
-      commit('setPlaying')
+      commit('setIsPlaying', true)
 
-      await state.api!.jukeboxSkip(newIndex, 0)
+      await jukebox.skip(newIndex, 0)
     },
-    seek({ state }, value) {
+    async seek({ state }, value) {
       if (isFinite(state.duration)) {
-        state.api!.jukeboxSkip(state.queueIndex, state.duration * value)
+        await jukebox.skip(state.queueIndex, state.duration * value)
       }
     },
     async resetQueue({ commit, state }) {
       commit('setQueueIndex', 0)
-      commit('setPaused')
+      commit('setIsPlaying', false)
 
-      await state.api!.jukeboxSkip(0, 0)
-      await state.api!.jukeboxStop()
+      await jukebox.skip(0, 0)
+      await jukebox.onPause()
     },
     toggleRepeat({ commit, state }) {
       commit('setRepeat', !state.repeat)
@@ -235,7 +232,7 @@ export const playerModule: Module<State, any> = {
     },
     async setVolume({ state, commit }, value) {
       commit('setVolume', value)
-      await state.api!.jukeboxSetGain(value)
+      await jukebox.setGain(value)
     },
     setPlaybackRate({ commit, getters }, value) {
       commit('setPodcastPlaybackRate', value)
@@ -275,6 +272,33 @@ export const playerModule: Module<State, any> = {
 }
 
 export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, api: API) {
+  jukebox.onPlayTrackListIndex = async(index: number) => {
+    await api.jukeboxSkip(index, 0)
+    await api.jukeboxStart()
+  }
+
+  jukebox.onPlayTrackList = async(tracks: Array<Track>, index: number) => {
+    await api.jukeboxSet(tracks.map((tr: any) => tr.id))
+    await api.jukeboxSkip(index, 0)
+    await api.jukeboxStart()
+  }
+
+  jukebox.onResume = async() => {
+    await api.jukeboxStart()
+  }
+
+  jukebox.onPause = async() => {
+    await api.jukeboxStop()
+  }
+
+  jukebox.skip = async(index: number, offset: number) => {
+    await api.jukeboxSkip(index, offset)
+  }
+
+  jukebox.setGain = async(gain: number) => {
+    await api.jukeboxSetGain(gain)
+  }
+
   const store = new Vuex.Store({
     strict: true,
     modules: {
@@ -284,9 +308,6 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
       },
     }
   })
-
-  // lol this is so hacky.
-  store.state.player.api = api
 
   // Update now playing
   store.watch(
@@ -314,6 +335,16 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
         }
       }
     })
+
+  setInterval(async() => {
+    const status = await api.jukeboxGet()
+
+    store.commit('player/setQueue', status.entry || [])
+    store.commit('player/setQueueIndex', status.currentIndex)
+    store.commit('player/setIsPlaying', status.playing)
+    store.commit('player/setVolume', status.gain)
+    store.commit('player/setCurrentTime', status.position)
+  }, 1000)
 
   return store
 }
