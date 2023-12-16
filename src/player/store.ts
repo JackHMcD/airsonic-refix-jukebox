@@ -15,6 +15,7 @@ export class JukeboxController {
   onPause: () => Promise<void> = async() => { /* do nothing */ }
   skip: (index: number, offset: number) => Promise<void> = async() => { /* do nothing */ }
   setGain: (gain: number) => Promise<void> = async() => { /* do nothing */ }
+  addToQueue: (tracks: Array<Track>) => Promise<void> = async() => { /* do nothing */ }
 }
 
 const jukebox = new JukeboxController()
@@ -209,8 +210,9 @@ export const playerModule: Module<State, any> = {
     setShuffle({ commit }, enable: boolean) {
       commit('setShuffle', enable)
     },
-    addToQueue({ state, commit }, tracks) {
+    async addToQueue({ state, commit }, tracks) {
       commit('addToQueue', state.shuffle ? shuffled(tracks) : tracks)
+      await jukebox.addToQueue(tracks)
     },
     setNextInQueue({ state, commit }, tracks) {
       commit('setNextInQueue', state.shuffle ? shuffled(tracks) : tracks)
@@ -263,7 +265,7 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
   }
 
   jukebox.onPlayTrackList = async(tracks: Array<Track>, index: number) => {
-    await api.jukeboxSet(tracks.map((tr: any) => tr.id))
+    await api.jukeboxSet(tracks.map((tr: Track) => tr.id))
     await api.jukeboxSkip(index, 0)
     await api.jukeboxStart()
   }
@@ -282,6 +284,10 @@ export function createPlayerStore(mainStore: ReturnType<typeof useMainStore>, ap
 
   jukebox.setGain = async(gain: number) => {
     await api.jukeboxSetGain(gain)
+  }
+
+  jukebox.addToQueue = async(tracks: Array<Track>) => {
+    await api.jukeboxAdd(tracks.map((tr: Track) => tr.id))
   }
 
   const store = new Vuex.Store({
