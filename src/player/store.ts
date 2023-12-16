@@ -205,7 +205,7 @@ export const playerModule: Module<State, any> = {
     },
     async seek({ state }, value) {
       if (isFinite(state.duration)) {
-        await jukebox.skip(state.queueIndex, state.duration * value)
+        await jukebox.skip(state.queueIndex, Math.floor(state.duration * value))
       }
     },
     async resetQueue({ commit, state }) {
