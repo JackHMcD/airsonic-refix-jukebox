@@ -1,4 +1,4 @@
-# Airsonic (refix) UI
+# Airsonic (refix) UI.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/tamland/airsonic-refix/ci.yml?style=flat-square)](https://github.com/tamland/airsonic-refix/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tamland/airsonic-refix?branch=master&style=flat-square)](https://hub.docker.com/r/tamland/airsonic-refix)
